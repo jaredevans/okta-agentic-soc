@@ -378,7 +378,7 @@ Method: `process_raw_events(events: List[OktaEvent])`
        - Run `LLMRiskAgent` to get `(RiskScore, promote)`.
        - If `promote` is `True`, create a `SecurityIncident` via `IncidentsRepo`.
 
-4. After Stage 1, you have zero or more `SecurityIncident` objects.
+4. If no findings are promoted to incidents, the response stage is skipped (no plans or commands are generated).
 
 ---
 
