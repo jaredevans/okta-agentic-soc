@@ -1,0 +1,121 @@
+[
+  {
+    "id": "evt-1001",
+    "event_type": "user.session.start",
+    "actor_id": "alice",
+    "actor_type": "User",
+    "target_id": "alice",
+    "ip_address": "203.0.113.10",
+    "user_agent": "Mozilla/5.0",
+    "city": "Washington",
+    "country": "US",
+    "outcome": "FAILURE",
+    "timestamp": "2025-11-12T18:00:00Z"
+  },
+  {
+    "id": "evt-1002",
+    "event_type": "user.session.start",
+    "actor_id": "alice",
+    "actor_type": "User",
+    "target_id": "alice",
+    "ip_address": "203.0.113.10",
+    "user_agent": "Mozilla/5.0",
+    "city": "Washington",
+    "country": "US",
+    "outcome": "FAILURE",
+    "timestamp": "2025-11-12T18:02:00Z"
+  },
+  {
+    "id": "evt-1003",
+    "event_type": "user.session.start",
+    "actor_id": "alice",
+    "actor_type": "User",
+    "target_id": "alice",
+    "ip_address": "203.0.113.10",
+    "user_agent": "Mozilla/5.0",
+    "city": "Washington",
+    "country": "US",
+    "outcome": "FAILURE",
+    "timestamp": "2025-11-12T18:04:00Z"
+  },
+  {
+    "id": "evt-1004",
+    "event_type": "user.session.start",
+    "actor_id": "alice",
+    "actor_type": "User",
+    "target_id": "alice",
+    "ip_address": "203.0.113.10",
+    "user_agent": "Mozilla/5.0",
+    "city": "Washington",
+    "country": "US",
+    "outcome": "FAILURE",
+    "timestamp": "2025-11-12T18:05:30Z"
+  },
+  {
+    "id": "evt-1005",
+    "event_type": "user.session.start",
+    "actor_id": "alice",
+    "actor_type": "User",
+    "target_id": "alice",
+    "ip_address": "203.0.113.10",
+    "user_agent": "Mozilla/5.0",
+    "city": "Washington",
+    "country": "US",
+    "outcome": "FAILURE",
+    "timestamp": "2025-11-12T18:06:00Z"
+  },
+
+  {
+    "id": "evt-2001",
+    "event_type": "user.session.start",
+    "actor_id": "bob",
+    "actor_type": "User",
+    "target_id": "bob",
+    "ip_address": "198.51.100.20",
+    "user_agent": "Mozilla/5.0",
+    "city": "Paris",
+    "country": "FR",
+    "outcome": "SUCCESS",
+    "timestamp": "2025-11-12T19:00:00Z"
+  },
+  {
+    "id": "evt-2002",
+    "event_type": "user.session.start",
+    "actor_id": "bob",
+    "actor_type": "User",
+    "target_id": "bob",
+    "ip_address": "198.51.100.30",
+    "user_agent": "Mozilla/5.0",
+    "city": "New York",
+    "country": "US",
+    "outcome": "SUCCESS",
+    "timestamp": "2025-11-12T19:25:00Z"
+  },
+
+  {
+    "id": "evt-3001",
+    "event_type": "user.session.start",
+    "actor_id": "charlie",
+    "actor_type": "User",
+    "target_id": "charlie",
+    "ip_address": "203.0.113.200",
+    "user_agent": "Mozilla/5.0",
+    "city": "Washington",
+    "country": "US",
+    "outcome": "SUCCESS",
+    "timestamp": "2025-11-12T20:00:00Z"
+  },
+  {
+    "id": "evt-3002",
+    "event_type": "user.session.start",
+    "actor_id": "charlie",
+    "actor_type": "User",
+    "target_id": "charlie",
+    "ip_address": "203.0.113.200",
+    "user_agent": "Mozilla/5.0",
+    "city": "Washington",
+    "country": "US",
+    "outcome": "SUCCESS",
+    "timestamp": "2025-11-12T20:05:00Z"
+  }
+]

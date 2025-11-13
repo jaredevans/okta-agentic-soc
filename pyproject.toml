@@ -1,0 +1,19 @@
+[project]
+name = "okta-agentic-soc"
+version = "0.1.0"
+description = "Agentic Okta security pipeline with LLM router orchestration"
+requires-python = ">=3.11"
+dependencies = [
+  "openai>=1.40.0",
+  "pydantic>=2.7",
+  "typer>=0.12",
+  "rich>=13.8",
+  "python-dotenv>=1.0",
+]
+
+[project.scripts]
+okta-soc = "okta_soc.interface.cli:main"
+
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"

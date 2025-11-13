@@ -1,0 +1,2 @@
+uv run okta-soc --hours 24
+uv run okta-soc show-all
