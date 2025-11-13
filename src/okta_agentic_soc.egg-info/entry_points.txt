@@ -1,0 +1,2 @@
+[console_scripts]
+okta-soc = okta_soc.interface.cli:main

@@ -165,6 +165,61 @@ Key Pydantic models (see `okta_soc/core/models.py`) include:
 
 All agents implement a minimal async `run()` method and are orchestrated in two stages.
 
+### Orchestrator
+
+**File:** `okta_soc/agents/orchestrator.py`
+
+The Orchestrator performs **two stages** of orchestration.
+
+#### Stage 1: Raw Events
+
+Method: `process_raw_events(events: List[OktaEvent])`
+
+1. Build router context:
+   ```python
+   context_raw = {
+       "kind": "raw_events",
+       "data": [e.model_dump() for e in events],
+   }
+   ```
+2. Ask `RouterAgent` for a route plan (`RoutePlan`).
+3. Execute steps in order:
+   - If `detector_agent`:
+     - Run detector agent on `events`.
+     - Save each `DetectionFinding` via `FindingsRepo`.
+   - If `risk_agent`:
+     - For each finding:
+       - Run `LLMRiskAgent` to get `(RiskScore, promote)`.
+       - If `promote` is `True`, create a `SecurityIncident` via `IncidentsRepo`.
+
+4. If no findings are promoted to incidents, the response stage is skipped (no plans or commands are generated).
+
+---
+
+#### Stage 2: Per Incident
+
+Method: `_process_single_incident(incident: SecurityIncident)`
+
+For each `incident`:
+
+1. Build router context:
+   ```python
+   context_incident = {
+       "kind": "incident",
+       "data": incident.model_dump(),
+   }
+   ```
+2. Ask `RouterAgent` for a route plan (`RoutePlan`) for response.
+3. Execute steps:
+   - If `planner_agent`:
+     - Run `PlannerAgent` to get a `ResponsePlan`.
+     - Save via `PlansRepo`.
+   - If `command_agent`:
+     - Run `CommandAgent` on the `ResponsePlan`.
+     - Save each `CommandSuggestion` via `CommandsRepo`.
+
+---
+
 ### RouterAgent
 
 **File:** `okta_soc/agents/router_agent.py`  
@@ -348,61 +403,6 @@ curl -X POST \
 ```
 
 The idea: **LLM suggests what to do**, but **humans decide if/how to run it.**
-
----
-
-### Orchestrator
-
-**File:** `okta_soc/agents/orchestrator.py`
-
-The Orchestrator performs **two stages** of orchestration.
-
-#### Stage 1: Raw Events
-
-Method: `process_raw_events(events: List[OktaEvent])`
-
-1. Build router context:
-   ```python
-   context_raw = {
-       "kind": "raw_events",
-       "data": [e.model_dump() for e in events],
-   }
-   ```
-2. Ask `RouterAgent` for a route plan (`RoutePlan`).
-3. Execute steps in order:
-   - If `detector_agent`:
-     - Run detector agent on `events`.
-     - Save each `DetectionFinding` via `FindingsRepo`.
-   - If `risk_agent`:
-     - For each finding:
-       - Run `LLMRiskAgent` to get `(RiskScore, promote)`.
-       - If `promote` is `True`, create a `SecurityIncident` via `IncidentsRepo`.
-
-4. If no findings are promoted to incidents, the response stage is skipped (no plans or commands are generated).
-
----
-
-#### Stage 2: Per Incident
-
-Method: `_process_single_incident(incident: SecurityIncident)`
-
-For each `incident`:
-
-1. Build router context:
-   ```python
-   context_incident = {
-       "kind": "incident",
-       "data": incident.model_dump(),
-   }
-   ```
-2. Ask `RouterAgent` for a route plan (`RoutePlan`) for response.
-3. Execute steps:
-   - If `planner_agent`:
-     - Run `PlannerAgent` to get a `ResponsePlan`.
-     - Save via `PlansRepo`.
-   - If `command_agent`:
-     - Run `CommandAgent` on the `ResponsePlan`.
-     - Save each `CommandSuggestion` via `CommandsRepo`.
 
 ---
 
