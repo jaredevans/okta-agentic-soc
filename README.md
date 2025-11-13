@@ -717,8 +717,8 @@ pip install .
 Set up your `.env`:
 
 ```env
-OKTA_ORG_URL="https://example.okta.com"
-OKTA_API_TOKEN="REPLACE_ME"
+OKTA_ORG_URL="https://example.okta.com" # Can leave unmodified for demo
+OKTA_API_TOKEN="REPLACE_ME" # Can leave unmodified for demo
 LLM_BASE_URL="http://localhost:1234/v1"
 LLM_MODEL="gpt-oss-20b"
 LLM_API_KEY="lm-studio"
