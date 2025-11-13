@@ -37,7 +37,7 @@ It ingests Okta System Log events, runs detectors, asks an LLM to score risk and
 This project is designed as:
 
 - A **reference implementation** for an *agentic security pipeline* focused on Okta events.
-- A teaching/demo tool for:
+- A demo tool for:
   - How to use LLMs as **orchestration routers** and **risk/response assistants**.
   - How to combine **deterministic detectors** with **probabilistic LLM analysis**.
 - A starting point that can be extended toward a real SOC integration.
