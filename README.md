@@ -59,7 +59,7 @@ Typical demo scenario:
 At a high level, the pipeline looks like this:
 
 ```text
-          Okta System Logs (demo JSON file for now)
+          Okta System Logs (demo JSON file)
                            │
                            ▼
                     [ OktaClient ]
