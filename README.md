@@ -102,7 +102,7 @@ All intermediate and final artifacts are written as `.jsonl` files in the `data/
 
 ## Findings
 
-<img src="https://i.imgur.com/mEeVmAB.png" width=500 height=500>
+<img src="https://i.imgur.com/mEeVmAB.png" width=700>
 
 ## Incidents
 
