@@ -98,6 +98,24 @@ At a high level, the pipeline looks like this:
 
 All intermediate and final artifacts are written as `.jsonl` files in the `data/` directory so you can inspect what happened at each step.
 
+# Screenshots
+
+## Findings
+
+<img src="https://i.imgur.com/mEeVmAB.png" width=500 height=500>
+
+## Incidents
+
+<img src="https://i.imgur.com/UpS9r3z.png" width=700>
+
+## Plans
+
+<img src="https://i.imgur.com/4SWQlTo.png" width=700>
+
+## Commands
+
+<img src="https://i.imgur.com/F5dBFlo.png" width=700>
+
 ---
 
 ## Core Data Models
