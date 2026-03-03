@@ -92,6 +92,6 @@ class CommandSuggestion(BaseModel):
 
 class EscalationResult(BaseModel):
     incident_id: str
-    channel: str
-    message: str
-    sent: bool
+    channel: str          # e.g., "#soc-critical-alerts"
+    message: str          # The formatted Slack message text
+    sent: bool            # True only for HIGH/CRITICAL severity
