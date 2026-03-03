@@ -4,6 +4,7 @@ from okta_soc.agents.detector_agent import DetectorAgent
 from okta_soc.agents.risk_agent import LLMRiskAgent
 from okta_soc.agents.planner_agent import PlannerAgent
 from okta_soc.agents.command_agent import CommandAgent
+from okta_soc.agents.escalation_agent import EscalationAgent
 
 
 def test_detector_agent_has_contract():
@@ -38,3 +39,12 @@ def test_command_agent_has_contract():
     assert agent.contract.name == "command_agent"
     assert "ResponsePlan" in agent.contract.consumes
     assert "List[CommandSuggestion]" in agent.contract.produces
+
+
+def test_escalation_agent_has_contract():
+    agent = EscalationAgent()
+    assert isinstance(agent.contract, AgentContract)
+    assert agent.contract.name == "escalation_agent"
+    assert "SecurityIncident" in agent.contract.consumes
+    assert "EscalationResult" in agent.contract.produces
+    assert "slack_notification" in agent.contract.side_effects
