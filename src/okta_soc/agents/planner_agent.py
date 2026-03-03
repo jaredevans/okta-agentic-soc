@@ -1,21 +1,31 @@
-from .base import BaseAgent
+from typing import Any, Dict
+from .base import BaseAgent, AgentContract
 from okta_soc.core.models import SecurityIncident, ResponsePlan, ResponseStep
 from okta_soc.core.llm import LLMClient
 
 
 class PlannerAgent(BaseAgent):
-    name = "planner_agent"
+    contract = AgentContract(
+        name="planner_agent",
+        description="Creates a ResponsePlan (steps, rationale) for a given SecurityIncident.",
+        consumes=["SecurityIncident"],
+        produces=["ResponsePlan"],
+        phase_hint="response",
+    )
 
     def __init__(self, llm: LLMClient):
         self.llm = llm
 
-    async def run(self, incident: SecurityIncident) -> ResponsePlan:
+    async def run(self, input_data: Dict[str, Any]) -> Dict[str, Any]:
+        incident = input_data["SecurityIncident"]
+        if isinstance(incident, dict):
+            incident = SecurityIncident.model_validate(incident)
+
         system_prompt = (
             "You are an incident response planner for Okta security incidents. "
             "You design step-by-step response plans that are safe and appropriate."
         )
 
-        # We give the model canonical step IDs that the CommandAgent understands.
         user_prompt = f"""
 SecurityIncident (JSON):
 {incident.model_dump_json(indent=2)}
@@ -73,4 +83,4 @@ Return ONLY JSON:
             steps=steps,
             notes=raw.get("notes"),
         )
-        return plan
+        return {"ResponsePlan": plan}

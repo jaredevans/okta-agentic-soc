@@ -1,17 +1,28 @@
-from typing import List, Optional
-from .base import BaseAgent
+from typing import Any, Dict, List, Optional
+from .base import BaseAgent, AgentContract
 from okta_soc.core.models import ResponsePlan, CommandSuggestion
 from okta_soc.core.config import load_settings
 
 
 class CommandAgent(BaseAgent):
-    name = "command_agent"
+    contract = AgentContract(
+        name="command_agent",
+        description="Generates read-only curl commands from a ResponsePlan "
+        "for a human analyst to review and execute.",
+        consumes=["ResponsePlan"],
+        produces=["List[CommandSuggestion]"],
+        phase_hint="response",
+    )
 
     def __init__(self, okta_org_url: Optional[str] = None):
         settings = load_settings()
         self.okta_org_url = (okta_org_url or settings.okta_org_url).rstrip("/")
 
-    async def run(self, plan: ResponsePlan) -> List[CommandSuggestion]:
+    async def run(self, input_data: Dict[str, Any]) -> Dict[str, Any]:
+        plan = input_data["ResponsePlan"]
+        if isinstance(plan, dict):
+            plan = ResponsePlan.model_validate(plan)
+
         suggestions: List[CommandSuggestion] = []
 
         for step in plan.steps:
@@ -74,7 +85,6 @@ class CommandAgent(BaseAgent):
                 )
 
             elif sid == "enable_mfa":
-                # This is highly org-specific; we just give a generic template.
                 cmd = (
                     "# Example: enroll an MFA factor for the user via Okta API\n"
                     "curl -X POST "
@@ -82,7 +92,7 @@ class CommandAgent(BaseAgent):
                     "-H 'Authorization: SSWS <REDACTED_TOKEN>' "
                     "-H 'Accept: application/json' "
                     "-H 'Content-Type: application/json' "
-                    "-d '{{\"factorType\": \"token:software:totp\", \"provider\": \"OKTA\"}}'"
+                    "-d '{\"factorType\": \"token:software:totp\", \"provider\": \"OKTA\"}'"
                 )
                 suggestions.append(
                     CommandSuggestion(
@@ -95,7 +105,4 @@ class CommandAgent(BaseAgent):
                     )
                 )
 
-            # For other step_ids (collect_auth_logs, analyze_geo_and_devices, etc.)
-            # you might not want API commands – they can stay as manual/human steps.
-
-        return suggestions
+        return {"List[CommandSuggestion]": suggestions}

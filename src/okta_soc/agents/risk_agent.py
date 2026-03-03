@@ -1,17 +1,30 @@
-from typing import Tuple
-from .base import BaseAgent
-from okta_soc.core.models import DetectionFinding, RiskScore, Severity
+from typing import Any, Dict
+from .base import BaseAgent, AgentContract
+from okta_soc.core.models import DetectionFinding, RiskScore, Severity, SecurityIncident
 from okta_soc.core.llm import LLMClient
+from datetime import datetime, timezone
+import uuid
 
 
 class LLMRiskAgent(BaseAgent):
-    name = "risk_agent"
+    contract = AgentContract(
+        name="risk_agent",
+        description="Assigns severity and risk scores to DetectionFindings, "
+        "deciding how serious each one is. Promotes high-risk findings to SecurityIncidents.",
+        consumes=["DetectionFinding"],
+        produces=["RiskScore", "SecurityIncident"],
+        phase_hint="analysis",
+    )
 
     def __init__(self, llm: LLMClient, promotion_threshold: float = 0.6):
         self.llm = llm
         self.promotion_threshold = promotion_threshold
 
-    async def run(self, finding: DetectionFinding) -> Tuple[RiskScore, bool]:
+    async def run(self, input_data: Dict[str, Any]) -> Dict[str, Any]:
+        finding = input_data["DetectionFinding"]
+        if isinstance(finding, dict):
+            finding = DetectionFinding.model_validate(finding)
+
         system_prompt = (
             "You are a security risk analyst for Okta authentication events. "
             "Given a detection finding, you assign severity, likelihood, impact, "
@@ -24,8 +37,8 @@ DetectionFinding (JSON):
 
 Your job:
 1. Decide severity: low, medium, high, or critical.
-2. Estimate likelihood and impact (0.0–1.0).
-3. Compute an overall risk score (0.0–1.0).
+2. Estimate likelihood and impact (0.0-1.0).
+3. Compute an overall risk score (0.0-1.0).
 4. Explain your reasoning briefly.
 
 Return ONLY JSON:
@@ -50,12 +63,28 @@ Return ONLY JSON:
             rationale=result["rationale"],
         )
 
-        # 🔑 Promotion logic:
-        # - promote if score >= threshold
-        # - OR if the model says severity is high/critical
         promote = (
             risk.score >= self.promotion_threshold
             or severity in {Severity.HIGH, Severity.CRITICAL}
         )
 
-        return risk, promote
+        outputs: Dict[str, Any] = {"RiskScore": risk}
+
+        if promote:
+            incident = SecurityIncident(
+                id=str(uuid.uuid4()),
+                finding_id=finding.id,
+                title=f"Incident from {finding.finding_type.value}",
+                description=finding.description,
+                severity=risk.severity,
+                risk_score=risk.score,
+                created_at=datetime.now(timezone.utc),
+                status="open",
+                metadata={
+                    "finding_type": finding.finding_type.value,
+                    **finding.metadata,
+                },
+            )
+            outputs["SecurityIncident"] = incident
+
+        return outputs
