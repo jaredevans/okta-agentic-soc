@@ -19,6 +19,7 @@ It ingests Okta System Log events, runs detectors, asks an LLM to score risk and
   - [LLMRiskAgent](#llmriskagent)
   - [PlannerAgent](#planneragent)
   - [CommandAgent](#commandagent)
+  - [EscalationAgent](#escalationagent)
   - [Orchestrator](#orchestrator)
 - [Pipeline Context](#pipeline-context)
 - [Detectors](#detectors)
@@ -94,12 +95,18 @@ The pipeline is driven by a single LLM routing decision. The router sees all ava
         → List[       → RiskScore            → ResponsePlan
      DetectionFinding]  + SecurityIncident       │
                         (if promoted)            ▼
-                                          [ CommandAgent ]
-                                           ResponsePlan ×N
-                                            → List[CommandSuggestion]
-                          │
-                          ▼
-                    data/*.jsonl
+                              │           [ CommandAgent ]
+                              │            ResponsePlan ×N
+                              │             → List[CommandSuggestion]
+                              │
+                              ▼
+                     [ EscalationAgent ]   ← only if LLM decides
+                      SecurityIncident ×N     severity warrants it
+                       → EscalationResult
+                         (simulated Slack)
+                              │
+                              ▼
+                        data/*.jsonl
 ```
 
 All intermediate and final artifacts are written as `.jsonl` files in the `data/` directory so you can inspect what happened at each step.
@@ -149,6 +156,11 @@ The router shows the LLM:
    - command_agent: Generates read-only curl commands...
      Consumes: ResponsePlan
      Produces: List[CommandSuggestion]
+
+   - escalation_agent: Sends Slack notification for high-severity incidents.
+     Consumes: SecurityIncident
+     Produces: EscalationResult
+     Side effects: slack_notification
    ```
 
 2. **What data types are currently available** in the pipeline (e.g., `["List[OktaEvent]"]`).
@@ -165,7 +177,8 @@ The LLM composes an ordered pipeline:
     {"agent_name": "detector_agent", "reason": "Detect anomalies in raw events"},
     {"agent_name": "risk_agent", "reason": "Score each finding", "iterate_over": "List[DetectionFinding]"},
     {"agent_name": "planner_agent", "reason": "Plan response per incident", "iterate_over": "List[SecurityIncident]"},
-    {"agent_name": "command_agent", "reason": "Generate commands", "iterate_over": "List[ResponsePlan]"}
+    {"agent_name": "command_agent", "reason": "Generate commands", "iterate_over": "List[ResponsePlan]"},
+    {"agent_name": "escalation_agent", "reason": "Notify SOC team of critical incidents", "iterate_over": "List[SecurityIncident]"}
   ]
 }
 ```
@@ -216,6 +229,9 @@ Key Pydantic models (see `okta_soc/core/models.py`) include:
 - **`CommandSuggestion`** — Safe, **read-only** command templates:
   - `step_id`, `description`, `command`, `system`, `read_only`, `notes`
 
+- **`EscalationResult`** — Record of a (simulated) Slack notification:
+  - `incident_id`, `channel`, `message`, `sent`
+
 ---
 
 ## Agent Contracts
@@ -246,6 +262,7 @@ The `consumes` and `produces` fields are the wiring rules. An agent can only app
 | `risk_agent` | `DetectionFinding` | `RiskScore`, `SecurityIncident` | analysis |
 | `planner_agent` | `SecurityIncident` | `ResponsePlan` | response |
 | `command_agent` | `ResponsePlan` | `List[CommandSuggestion]` | response |
+| `escalation_agent` | `SecurityIncident` | `EscalationResult` | response |
 
 ---
 
@@ -350,6 +367,25 @@ Generates `curl` command templates for known `step_id` values (`lock_account`, `
 
 ---
 
+### EscalationAgent
+
+**File:** `okta_soc/agents/escalation_agent.py`
+
+- **Consumes:** `SecurityIncident` (called per-incident via `iterate_over`)
+- **Produces:** `EscalationResult`
+- **LLM:** No — deterministic.
+- **Side effects:** `slack_notification`
+
+This is the first agent to use `side_effects` in its contract, which signals to the LLM router that it has external effects and should only be included when the situation warrants it.
+
+**The LLM router decides whether to include this agent.** The agent description tells the router it's for high-severity incidents, and the router's system prompt says to "prefer agents with side_effects only when the situation warrants it." This makes the routing decision genuinely context-sensitive — the first place in the pipeline where the LLM's choice actually matters.
+
+**Internal safety net:** Even if the router includes this agent for a low-severity incident, the agent guards internally — it only sends (`sent=True`) for HIGH or CRITICAL severity. For LOW or MEDIUM, it returns `sent=False` and skips the notification.
+
+Currently simulates Slack via logging. Ready to wire to a real Slack webhook when needed.
+
+---
+
 ## Pipeline Context
 
 **File:** `okta_soc/core/pipeline_context.py`
@@ -398,6 +434,7 @@ All artifacts live in `data/` as JSON Lines (`.jsonl`):
 - `data/incidents.jsonl` — one `SecurityIncident` per line
 - `data/plans.jsonl` — one `ResponsePlan` per line
 - `data/commands.jsonl` — one `CommandSuggestion` record per line
+- `data/escalations.jsonl` — one `EscalationResult` per line
 
 The `show-all` command pretty-prints all of these with Rich panels.
 
@@ -505,34 +542,36 @@ Done. The `DetectorAgent` automatically runs all registered detectors.
 
 This is where the typed contract system shines. **Two steps only — no router or orchestrator changes needed.**
 
+The `EscalationAgent` was added this way. Here's the pattern:
+
 1. **Write the agent class with a contract:**
 
    ```python
    from okta_soc.agents.base import BaseAgent, AgentContract
 
-   class SlackNotifierAgent(BaseAgent):
+   class EscalationAgent(BaseAgent):
        contract = AgentContract(
-           name="slack_notifier",
-           description="Sends a formatted alert to the #security-alerts Slack channel.",
+           name="escalation_agent",
+           description="Sends Slack notification for high-severity or critical security incidents.",
            consumes=["SecurityIncident"],
-           produces=["NotificationResult"],
+           produces=["EscalationResult"],
            phase_hint="response",
-           side_effects=["slack_notification"],
+           side_effects=["slack_notification"],  # tells router this has external effects
        )
 
        async def run(self, input_data):
            incident = input_data["SecurityIncident"]
-           result = await self.slack_client.post_alert(incident)
-           return {"NotificationResult": result}
+           # ... format message, simulate Slack send ...
+           return {"EscalationResult": result}
    ```
 
 2. **Register it in `pipeline.py`:**
 
    ```python
-   registry.register(SlackNotifierAgent(slack_client=client))
+   registry.register(EscalationAgent())
    ```
 
-That's it. The LLM router will see this agent in its catalog and can choose to include it when processing incidents. The type system ensures it can only be wired where `SecurityIncident` is available. No router or orchestrator edits required.
+That's it. The LLM router sees this agent in its catalog and decides whether to include it based on context. The `side_effects` field signals the router to be selective. The type system ensures it can only be wired where `SecurityIncident` is available. No router or orchestrator edits required.
 
 **Adding enrichment agents works the same way.** For example, an IP reputation agent that consumes `DetectionFinding` and produces `EnrichedFinding` would slot in between the detector and risk agents — the LLM figures out the ordering from the types.
 
@@ -600,4 +639,4 @@ Or use the convenience script:
 python -m pytest tests/ -v
 ```
 
-25 tests covering agent contracts, registry, router validation, orchestrator execution, and pipeline wiring.
+33 tests covering agent contracts, registry, router validation, orchestrator execution, pipeline wiring, and escalation agent behavior.
