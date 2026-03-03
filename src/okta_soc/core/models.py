@@ -88,3 +88,10 @@ class CommandSuggestion(BaseModel):
     system: str  # e.g. "okta_api", "okta_cli", "siem", "email"
     read_only: bool = True
     notes: Optional[str] = None
+
+
+class EscalationResult(BaseModel):
+    incident_id: str
+    channel: str
+    message: str
+    sent: bool
