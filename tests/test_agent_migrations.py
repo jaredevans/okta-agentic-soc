@@ -21,6 +21,7 @@ def test_risk_agent_has_contract():
     assert agent.contract.name == "risk_agent"
     assert "DetectionFinding" in agent.contract.consumes
     assert "RiskScore" in agent.contract.produces
+    assert "SecurityIncident" in agent.contract.produces
 
 
 def test_planner_agent_has_contract():
