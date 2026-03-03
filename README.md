@@ -2,7 +2,7 @@
 
 An AI-assisted, agent-based pipeline that mimics a mini Security Operations Center (SOC) for Okta.
 
-It ingests Okta System Log events, runs detectors, asks an LLM to score risk and create response plans, and then generates **read-only** remediation commands — all wired together by an LLM-driven router with hard guardrails.
+It ingests Okta System Log events, runs detectors, asks an LLM to score risk and create response plans, and generates **read-only** remediation commands — all wired together by an LLM-driven router that **genuinely decides** which agents to run, constrained only by typed contracts.
 
 ---
 
@@ -10,7 +10,9 @@ It ingests Okta System Log events, runs detectors, asks an LLM to score risk and
 
 - [Goals & Use Cases](#goals--use-cases)
 - [High-Level Architecture](#high-level-architecture)
+- [How the LLM Router Works](#how-the-llm-router-works)
 - [Core Data Models](#core-data-models)
+- [Agent Contracts](#agent-contracts)
 - [Agents](#agents)
   - [RouterAgent](#routeragent)
   - [DetectorAgent](#detectoragent)
@@ -18,6 +20,7 @@ It ingests Okta System Log events, runs detectors, asks an LLM to score risk and
   - [PlannerAgent](#planneragent)
   - [CommandAgent](#commandagent)
   - [Orchestrator](#orchestrator)
+- [Pipeline Context](#pipeline-context)
 - [Detectors](#detectors)
 - [Storage & Artifacts](#storage--artifacts)
 - [CLI Usage](#cli-usage)
@@ -38,62 +41,65 @@ This project is designed as:
 
 - A **reference implementation** for an *agentic security pipeline* focused on Okta events.
 - A demo tool for:
-  - How to use LLMs as **orchestration routers** and **risk/response assistants**.
+  - How to use LLMs as **genuine orchestration routers** that decide which agents to run based on typed contracts.
   - How to combine **deterministic detectors** with **probabilistic LLM analysis**.
+  - How **type-safe constraints** can replace hardcoded guardrails while keeping the system safe.
 - A starting point that can be extended toward a real SOC integration.
 
 Typical demo scenario:
 
 1. Feed in a small set of Okta System Log events.
-2. Run the pipeline for a time window (e.g., last 24 hours).
+2. Run the pipeline.
 3. Walk through:
    - What detections were raised.
    - How the LLM scored risk and promoted incidents.
-   - How the router decided which agents to run.
+   - How the router decided which agents to run (and why).
    - The final response plan and suggested commands.
 
 ---
 
 ## High-Level Architecture
 
-At a high level, the pipeline looks like this:
+The pipeline is driven by a single LLM routing decision. The router sees all available agents and their type contracts, then composes a pipeline. The orchestrator validates and executes it.
 
 ```text
-          Okta System Logs (demo JSON file)
-                           │
-                           ▼
-                    [ OktaClient ]
-                           │
-                           ▼
-                  [ Orchestrator.stage1 ]
-                           │
-                 (kind = "raw_events")
-                           │
-                  ┌───────────────────┐
-                  │   RouterAgent     │  ← LLM decides which analysis agents
-                  └───────────────────┘     to run (with guardrails)
-                           │
-                 ┌─────────┴─────────┐
-                 ▼                   ▼
-        [ DetectorAgent ]     [ LLMRiskAgent ]
-              │                       │
-        Findings (.jsonl)       Risk + Incidents
-                                         │
-                                         ▼
-                  [ Orchestrator.stage2 per incident ]
-                           │
-                    (kind = "incident")
-                           │
-                  ┌───────────────────┐
-                  │   RouterAgent     │  ← LLM chooses planner/command agents
-                  └───────────────────┘
-                           │
-                 ┌─────────┴─────────┐
-                 ▼                   ▼
-          [ PlannerAgent ]     [ CommandAgent ]
-                 │                   │
-         ResponsePlans (.jsonl)  CommandSuggestions (.jsonl)
-
+         Okta System Logs (demo JSON file)
+                          │
+                          ▼
+                   [ OktaClient ]
+                          │
+                  List[OktaEvent]
+                          │
+                          ▼
+              ┌───────────────────────┐
+              │   RouterAgent (LLM)   │  ← Sees agent catalog + available types
+              │                       │     Composes a pipeline of agents
+              └───────────────────────┘
+                          │
+                   RoutePlan (validated by type compatibility)
+                          │
+                          ▼
+              ┌───────────────────────┐
+              │     Orchestrator      │  ← Executes plan step-by-step
+              │  (generic, no agent-  │     Handles iterate_over for
+              │   specific logic)     │     per-item processing
+              └───────────────────────┘
+                          │
+          Typical pipeline composed by LLM:
+                          │
+          ┌───────────────┼────────────────────────┐
+          ▼               ▼                        ▼
+  [ DetectorAgent ]  [ RiskAgent ]          [ PlannerAgent ]
+   List[OktaEvent]   DetectionFinding ×N    SecurityIncident ×N
+        → List[       → RiskScore            → ResponsePlan
+     DetectionFinding]  + SecurityIncident       │
+                        (if promoted)            ▼
+                                          [ CommandAgent ]
+                                           ResponsePlan ×N
+                                            → List[CommandSuggestion]
+                          │
+                          ▼
+                    data/*.jsonl
 ```
 
 All intermediate and final artifacts are written as `.jsonl` files in the `data/` directory so you can inspect what happened at each step.
@@ -118,180 +124,172 @@ All intermediate and final artifacts are written as `.jsonl` files in the `data/
 
 ---
 
+## How the LLM Router Works
+
+The key design decision: **the LLM genuinely decides which agents to run**. There are no hardcoded `if kind == "raw_events"` branches or force-inserted agents. Instead, the system uses **typed contracts** as the only constraint.
+
+### What the LLM Sees
+
+The router shows the LLM:
+
+1. **A catalog of all registered agents** with their contracts:
+   ```
+   - detector_agent: Analyzes Okta events to detect anomalies...
+     Consumes: List[OktaEvent]
+     Produces: List[DetectionFinding]
+
+   - risk_agent: Assigns severity and risk scores...
+     Consumes: DetectionFinding
+     Produces: RiskScore, SecurityIncident
+
+   - planner_agent: Creates a ResponsePlan...
+     Consumes: SecurityIncident
+     Produces: ResponsePlan
+
+   - command_agent: Generates read-only curl commands...
+     Consumes: ResponsePlan
+     Produces: List[CommandSuggestion]
+   ```
+
+2. **What data types are currently available** in the pipeline (e.g., `["List[OktaEvent]"]`).
+
+3. **Pipeline metadata** (source, time window, etc.).
+
+### What the LLM Returns
+
+The LLM composes an ordered pipeline:
+
+```json
+{
+  "steps": [
+    {"agent_name": "detector_agent", "reason": "Detect anomalies in raw events"},
+    {"agent_name": "risk_agent", "reason": "Score each finding", "iterate_over": "List[DetectionFinding]"},
+    {"agent_name": "planner_agent", "reason": "Plan response per incident", "iterate_over": "List[SecurityIncident]"},
+    {"agent_name": "command_agent", "reason": "Generate commands", "iterate_over": "List[ResponsePlan]"}
+  ]
+}
+```
+
+The `iterate_over` field tells the orchestrator to run that agent once per item in a list (e.g., run `risk_agent` once per `DetectionFinding`).
+
+### Type Validation (Not Hardcoded Rules)
+
+After the LLM responds, `_validate_type_compatibility` walks the plan step-by-step:
+
+1. Tracks which data types are available (starting from initial context).
+2. For each step, checks: are this agent's `consumes` types available?
+3. If not, the step is removed (not force-inserted).
+4. After each valid step, adds that agent's `produces` types to the available set.
+5. **Auto-detects iteration**: if an agent consumes `T` but only `List[T]` is available, automatically sets `iterate_over`.
+
+This means the **types are the guardrails**. The LLM can't compose a nonsensical pipeline because the type checker won't validate it. But within the space of type-valid pipelines, the LLM has full freedom.
+
+---
+
 ## Core Data Models
 
 Key Pydantic models (see `okta_soc/core/models.py`) include:
 
-- **`OktaEvent`**  
-  A normalized view of an Okta System Log event, including:
+- **`OktaEvent`** — A normalized view of an Okta System Log event, including:
   - `id`, `event_type`, `actor_id`, `target_id`, `ip_address`, `user_agent`
   - Geo fields (`city`, `country`, `latitude`, `longitude`)
   - `outcome` (`SUCCESS` or `FAILURE`)
   - `timestamp` (timezone-aware `datetime`, normalized to UTC)
   - `raw` (the original event JSON)
 
-- **`DetectionFinding`**  
-  Output of detectors — a single suspicious pattern or anomaly:
-  - `id` (UUID)
-  - `finding_type` (`IMPOSSIBLE_TRAVEL`, `FAILED_LOGIN_BURST`, `MFA_FATIGUE`, `OTHER`)
-  - `description`
-  - `okta_event_ids` (events that triggered this finding)
-  - `user_id`
-  - `created_at`
-  - `metadata` (detector-specific details)
+- **`DetectionFinding`** — Output of detectors:
+  - `id` (UUID), `finding_type`, `description`
+  - `okta_event_ids`, `user_id`, `created_at`, `metadata`
 
-- **`RiskScore`**  
-  Risk analysis from the LLM:
+- **`RiskScore`** — Risk analysis from the LLM:
   - `severity`: `low | medium | high | critical`
-  - `likelihood`: 0.0–1.0
-  - `impact`: 0.0–1.0
-  - `score`: overall 0.0–1.0
-  - `rationale`: short explanation
+  - `likelihood`, `impact`, `score` (0.0–1.0)
+  - `rationale`
 
-- **`SecurityIncident`**  
-  A promoted, trackable incident:
-  - `id` (UUID)
-  - `finding_id` (source finding)
-  - `title`, `description`
-  - `severity`, `risk_score`
-  - `created_at` (UTC)
-  - `status` (`open | triaged | closed`)
-  - `metadata` (enriched context)
+- **`SecurityIncident`** — A promoted, trackable incident:
+  - `id`, `finding_id`, `title`, `description`
+  - `severity`, `risk_score`, `created_at`, `status`
 
-- **`ResponsePlan`** and **`ResponseStep`**  
-  Structured response steps produced by the LLM:
-  - `overall_goal`: what the plan is trying to achieve
-  - `steps`: list of `ResponseStep` entries
-    - `step_id` (canonical IDs like `lock_account`, `revoke_sessions`, etc.)
-    - `description`
-    - `rationale`
-    - `requires_human_approval`
-    - `dependencies` (optional list of step_ids)
+- **`ResponsePlan`** and **`ResponseStep`** — Structured response steps from the LLM:
+  - `overall_goal`, `steps` (each with `step_id`, `description`, `rationale`, `requires_human_approval`, `dependencies`)
 
-- **`CommandSuggestion`**  
-  Safe, **read-only** command templates for humans to review:
-  - `step_id`
-  - `description`
-  - `command` (e.g., `curl` templates)
-  - `system` (e.g., `"okta_api"`)
-  - `read_only` (bool)
-  - `notes`
+- **`CommandSuggestion`** — Safe, **read-only** command templates:
+  - `step_id`, `description`, `command`, `system`, `read_only`, `notes`
+
+---
+
+## Agent Contracts
+
+Every agent declares a typed contract that describes what data it consumes and produces. This is the foundation of the dynamic routing system.
+
+**File:** `okta_soc/agents/base.py`
+
+```python
+@dataclass
+class AgentContract:
+    name: str               # Unique agent identifier
+    description: str        # Rich description for the LLM to reason about
+    consumes: List[str]     # Data type keys this agent reads (e.g., ["List[OktaEvent]"])
+    produces: List[str]     # Data type keys this agent writes (e.g., ["List[DetectionFinding]"])
+    phase_hint: str         # Advisory: "ingest", "analysis", "response"
+    side_effects: List[str] # e.g., ["slack_notification"] — helps LLM decide when to use
+    requires_human_approval: bool  # Whether output needs sign-off
+```
+
+The `consumes` and `produces` fields are the wiring rules. An agent can only appear in the pipeline if its inputs are available from a prior step or from the initial context.
+
+**Current agent contracts:**
+
+| Agent | Consumes | Produces | Phase |
+|-------|----------|----------|-------|
+| `detector_agent` | `List[OktaEvent]` | `List[DetectionFinding]` | ingest |
+| `risk_agent` | `DetectionFinding` | `RiskScore`, `SecurityIncident` | analysis |
+| `planner_agent` | `SecurityIncident` | `ResponsePlan` | response |
+| `command_agent` | `ResponsePlan` | `List[CommandSuggestion]` | response |
 
 ---
 
 ## Agents
 
-All agents implement a minimal async `run()` method and are orchestrated in two stages.
+All agents implement `BaseAgent` with an `async run(input_data: Dict[str, Any]) -> Dict[str, Any]` method. Input and output are keyed by type name (matching the contract).
 
 ### Orchestrator
 
 **File:** `okta_soc/agents/orchestrator.py`
 
-The Orchestrator performs **two stages** of orchestration.
+The Orchestrator is fully generic — it has **zero knowledge of specific agents**. It:
 
-#### Stage 1: Raw Events
+1. Creates a `PipelineContext` from initial data and metadata.
+2. Asks the `RouterAgent` to compose a pipeline.
+3. For each step in the plan:
+   - Looks up the agent by name from the `AgentRegistry`.
+   - If `iterate_over` is set, runs the agent once per item in the specified list, collecting outputs into `List[T]` keys.
+   - Otherwise, runs the agent once with the full context.
+   - Records a `StepResult` in the context history for auditability.
+4. Returns the final `PipelineContext` with all accumulated data.
 
-Method: `process_raw_events(events: List[OktaEvent])`
-
-1. Build router context:
-   ```python
-   context_raw = {
-       "kind": "raw_events",
-       "data": [e.model_dump() for e in events],
-   }
-   ```
-2. Ask `RouterAgent` for a route plan (`RoutePlan`).
-3. Execute steps in order:
-   - If `detector_agent`:
-     - Run detector agent on `events`.
-     - Save each `DetectionFinding` via `FindingsRepo`.
-   - If `risk_agent`:
-     - For each finding:
-       - Run `LLMRiskAgent` to get `(RiskScore, promote)`.
-       - If `promote` is `True`, create a `SecurityIncident` via `IncidentsRepo`.
-
-4. If no findings are promoted to incidents, the response stage is skipped (no plans or commands are generated).
-
----
-
-#### Stage 2: Per Incident
-
-Method: `_process_single_incident(incident: SecurityIncident)`
-
-For each `incident`:
-
-1. Build router context:
-   ```python
-   context_incident = {
-       "kind": "incident",
-       "data": incident.model_dump(),
-   }
-   ```
-2. Ask `RouterAgent` for a route plan (`RoutePlan`) for response.
-3. Execute steps:
-   - If `planner_agent`:
-     - Run `PlannerAgent` to get a `ResponsePlan`.
-     - Save via `PlansRepo`.
-   - If `command_agent`:
-     - Run `CommandAgent` on the `ResponsePlan`.
-     - Save each `CommandSuggestion` via `CommandsRepo`.
+Adding a new agent requires **no changes** to the Orchestrator.
 
 ---
 
 ### RouterAgent
 
-**File:** `okta_soc/agents/router_agent.py`  
-**Purpose:** LLM-driven orchestration router with hard guardrails.
+**File:** `okta_soc/agents/router_agent.py`
 
-Given a context like:
+The RouterAgent is the LLM-driven orchestration controller. It is **not** a `BaseAgent` subclass — it's special infrastructure.
 
-- `{"kind": "raw_events", "data": [...]}` or
-- `{"kind": "incident", "data": {...}}`
+Given a `PipelineContext`, the RouterAgent:
 
-The RouterAgent:
+1. Builds a catalog description from all registered agents (via `AgentRegistry.catalog_for_llm()`).
+2. Lists what data types are currently available.
+3. Asks the LLM to compose an ordered pipeline as JSON.
+4. Validates the plan via `_validate_type_compatibility`:
+   - Removes unknown agents.
+   - Removes agents whose inputs aren't available.
+   - Auto-detects when `iterate_over` should be set.
+   - Tracks produced types step-by-step.
 
-1. Shows the LLM a catalog of available agents from `okta_soc/agents/registry.py` (name, description, input type, output type, phase, criticality).
-2. Provides **routing rules** that depend on `context["kind"]`:
-
-   - For `kind == "raw_events"`:
-     - Phase must be `ingest` or `analysis`.
-     - `detector_agent` **must** be included.
-     - `risk_agent` **must** be included **after** `detector_agent`.
-     - `planner_agent` and `command_agent` must **not** be used.
-
-   - For `kind == "incident"`:
-     - Phase must be `response`.
-     - `planner_agent` **must** be included.
-     - For `high` or `critical` incidents, `command_agent` **should** be included.
-
-3. Asks the LLM to return **only JSON**:
-   ```json
-   {
-     "phase": "ingest|analysis|response",
-     "steps": [
-       {
-         "agent_name": "string",
-         "reason": "string",
-         "when": "string"
-       }
-     ],
-     "notes": "string or null"
-   }
-   ```
-
-4. **Guardrails layer** (non-negotiable logic in Python):
-   - For `raw_events`:
-     - Ensures `detector_agent` is present and first.
-     - Ensures `risk_agent` is present and after detector.
-     - Drops any agents that aren’t `detector_agent` or `risk_agent`.
-     - Forces `phase = "ingest"`.
-   - For `incident`:
-     - Ensures `planner_agent` is present.
-     - If severity is `high` or `critical`, ensures `command_agent` is present.
-     - Drops agents that are not `planner_agent` or `command_agent`.
-     - Forces `phase = "response"`.
-
-The result is a **LLM-guided but rule-constrained** routing plan that prevents the model from doing something nonsensical.
+The LLM has full freedom to include, exclude, or reorder agents — as long as the types line up.
 
 ---
 
@@ -299,21 +297,11 @@ The result is a **LLM-guided but rule-constrained** routing plan that prevents t
 
 **File:** `okta_soc/agents/detector_agent.py`
 
-- Responsible for turning raw `OktaEvent` lists into `DetectionFinding` objects.
-- It doesn’t use the LLM: it just calls all registered detectors from `okta_soc/detectors/registry.py`.
+- **Consumes:** `List[OktaEvent]`
+- **Produces:** `List[DetectionFinding]`
+- **LLM:** No — purely deterministic.
 
-Workflow:
-
-```python
-events: List[OktaEvent] → DetectorAgent.run(events) → List[DetectionFinding]
-```
-
-In this demo, there are two detectors:
-
-- `ImpossibleTravelDetector`
-- `FailedLoginBurstDetector`
-
-(See [Detectors](#detectors) below.)
+Calls all registered detectors from `okta_soc/detectors/registry.py` and returns their combined findings.
 
 ---
 
@@ -321,31 +309,20 @@ In this demo, there are two detectors:
 
 **File:** `okta_soc/agents/risk_agent.py`
 
-- Uses the LLM to **score risk** for each `DetectionFinding`.
-- Returns:
-  - A `RiskScore` object.
-  - A boolean `promote` flag that decides whether to create an incident.
+- **Consumes:** `DetectionFinding` (called per-finding via `iterate_over`)
+- **Produces:** `RiskScore`, and conditionally `SecurityIncident`
+- **LLM:** Yes — scores risk.
 
-The prompt instructs the LLM to:
-
-1. Choose severity (`low | medium | high | critical`).
-2. Assign numeric `likelihood` and `impact`.
-3. Compute `score` (0.0–1.0).
-4. Provide a short `rationale`.
-
-Promotion logic (hard-coded, not in the LLM):
+The LLM assigns severity, likelihood, impact, and an overall score. Promotion logic is deterministic:
 
 ```python
 promote = (
-    risk.score >= self.promotion_threshold
+    risk.score >= self.promotion_threshold  # default 0.6
     or severity in {Severity.HIGH, Severity.CRITICAL}
 )
 ```
 
-By default, `promotion_threshold` is `0.6`. So:
-
-- **High risk score** OR **high/critical severity** ⇒ promote to `SecurityIncident`.
-- Anything else ⇒ treated as lower priority (no incident created).
+When promoted, the agent creates a `SecurityIncident` directly in its output. When not promoted, only `RiskScore` is returned.
 
 ---
 
@@ -353,43 +330,11 @@ By default, `promotion_threshold` is `0.6`. So:
 
 **File:** `okta_soc/agents/planner_agent.py`
 
-- Takes a `SecurityIncident`.
-- Asks the LLM to design a **structured response plan**.
-- The plan uses canonical `step_id` values where possible, such as:
+- **Consumes:** `SecurityIncident` (called per-incident via `iterate_over`)
+- **Produces:** `ResponsePlan`
+- **LLM:** Yes — designs response steps.
 
-  - `collect_auth_logs`
-  - `analyze_geo_and_devices`
-  - `lock_account`
-  - `notify_user`
-  - `enable_mfa`
-  - `revoke_sessions`
-  - `forensic_review`
-  - `update_incident_status`
-
-The LLM is required to return exactly one JSON object:
-
-```json
-{
-  "overall_goal": "string",
-  "steps": [
-    {
-      "step_id": "string",
-      "description": "string",
-      "rationale": "string",
-      "requires_human_approval": true,
-      "dependencies": ["optional_step_id"]
-    }
-  ],
-  "notes": "string or null"
-}
-```
-
-The planner enforces:
-
-- All steps must be **safe** and **non-destructive**.
-- Everything is assumed to be **reviewed by a human analyst** before execution.
-
-The result is converted into a `ResponsePlan` with `ResponseStep` entries.
+Uses canonical `step_id` values where possible: `collect_auth_logs`, `analyze_geo_and_devices`, `lock_account`, `notify_user`, `enable_mfa`, `revoke_sessions`, `forensic_review`, `update_incident_status`.
 
 ---
 
@@ -397,30 +342,29 @@ The result is converted into a `ResponsePlan` with `ResponseStep` entries.
 
 **File:** `okta_soc/agents/command_agent.py`
 
-- Converts a `ResponsePlan` into a list of `CommandSuggestion` objects.
-- Only handles specific `step_id`s:
-  - `lock_account`
-  - `force_password_reset`
-  - `revoke_sessions`
-  - `enable_mfa`
+- **Consumes:** `ResponsePlan` (called per-plan via `iterate_over`)
+- **Produces:** `List[CommandSuggestion]`
+- **LLM:** No — deterministic template mapping.
 
-For each known `step_id`, it generates a **template** `curl` command against the Okta API:
+Generates `curl` command templates for known `step_id` values (`lock_account`, `force_password_reset`, `revoke_sessions`, `enable_mfa`). Commands use `{userId}` and `<REDACTED_TOKEN>` placeholders. All marked `read_only=True`.
 
-- Uses `OKTA_ORG_URL` from config.
-- Leaves `{userId}` and `SSWS` token placeholders for humans to fill in.
-- Marks commands as `read_only=True` in the metadata (semantically: “do not auto-execute”).
+---
 
-Example (simplified):
+## Pipeline Context
 
-```bash
-curl -X POST \
-  https://your-org.okta.com/api/v1/users/{userId}/lifecycle/suspend \
-  -H 'Authorization: SSWS <REDACTED_TOKEN>' \
-  -H 'Accept: application/json' \
-  -H 'Content-Type: application/json'
+**File:** `okta_soc/core/pipeline_context.py`
+
+The `PipelineContext` is the shared state that flows through the pipeline:
+
+```python
+@dataclass
+class PipelineContext:
+    data: Dict[str, Any]         # Keyed by type name: {"List[OktaEvent]": [...], ...}
+    metadata: Dict[str, Any]     # Pipeline-level info (source, since, run_id)
+    history: List[StepResult]    # Audit trail of what ran and what it produced
 ```
 
-The idea: **LLM suggests what to do**, but **humans decide if/how to run it.**
+Agents read their inputs from `context.data` (keyed by their `consumes` types) and write their outputs back (keyed by their `produces` types). The orchestrator manages this flow automatically.
 
 ---
 
@@ -432,79 +376,51 @@ Detectors are small, deterministic analyzers for specific patterns in Okta event
 
 **File:** `okta_soc/detectors/impossible_travel.py`
 
-Logic:
-
-- Group events by `actor_id`.
-- Sort each actor’s events by timestamp.
-- For each consecutive pair `(a, b)`:
-  - If either event has no `country`, skip.
-  - If `a.country == b.country`, skip.
-  - Compute `dt = b.timestamp - a.timestamp`.
-  - If `dt < 1 hour`, emit a `DetectionFinding`:
-    - `finding_type = IMPOSSIBLE_TRAVEL`
-    - Description like:
-      > Possible impossible travel for actor bob: FR -> US within 0:25:00.
+- Groups events by `actor_id`.
+- For consecutive events with different countries and time delta < 1 hour, emits a `IMPOSSIBLE_TRAVEL` finding.
 
 ### `FailedLoginBurstDetector`
 
 **File:** `okta_soc/detectors/failed_login_burst.py`
 
-Parameters:
-
-- `threshold` (default: 5)
-- `window_minutes` (default: 10)
-
-Logic:
-
-- Group events by `actor_id`.
-- Keep only events with `outcome == "FAILURE"`.
-- For each actor’s failed events (sorted by time):
-  - Slide a window of width `window_minutes`.
-  - If within that window there are ≥ `threshold` failures:
-    - Emit `DetectionFinding` with:
-      - `finding_type = FAILED_LOGIN_BURST`
-      - `description` like:
-        > 7 failed logins for actor alice within 0:10:00.
-      - `metadata` includes count and window length.
+- Groups events by `actor_id`, filters `outcome == "FAILURE"`.
+- Slides a window (default: 10 minutes). If >= 5 failures in that window, emits a `FAILED_LOGIN_BURST` finding.
 
 ---
 
 ## Storage & Artifacts
 
-**File:** `okta_soc/storage/repositories.py`  
+**File:** `okta_soc/storage/repositories.py`
+
 All artifacts live in `data/` as JSON Lines (`.jsonl`):
 
-- `data/findings.jsonl` – one `DetectionFinding` per line.
-- `data/incidents.jsonl` – one `SecurityIncident` per line.
-- `data/plans.jsonl` – one `ResponsePlan` per line.
-- `data/commands.jsonl` – one `{incident_id, command}` record per line.
+- `data/findings.jsonl` — one `DetectionFinding` per line
+- `data/incidents.jsonl` — one `SecurityIncident` per line
+- `data/plans.jsonl` — one `ResponsePlan` per line
+- `data/commands.jsonl` — one `CommandSuggestion` record per line
 
-The `show-all` interface nicely pretty-prints all of these.
+The `show-all` command pretty-prints all of these with Rich panels.
 
 ---
 
 ## CLI Usage
-
-The CLI entrypoint is defined in `pyproject.toml`:
 
 ```toml
 [project.scripts]
 okta-soc = "okta_soc.interface.cli:main"
 ```
 
-After installing the project (see below), you can use:
-
 ### Run the Full Pipeline
 
 ```bash
-okta-soc --hours 24
+okta-soc --hours 100000   # use a large value for demo data (events are from Nov 2025)
 ```
 
 This will:
 
-1. Load events from the demo JSON file (see [Demo Mode vs Real Okta](#demo-mode-vs-real-okta)).
-2. Run Stage 1 (detection + risk).
-3. Run Stage 2 (planning + commands) for any promoted incidents.
+1. Load events from the demo JSON file.
+2. Ask the LLM router to compose a pipeline.
+3. Execute the pipeline (detection → risk scoring → planning → commands).
 4. Write all artifacts into `data/`.
 
 ### View All Artifacts
@@ -513,35 +429,13 @@ This will:
 okta-soc show-all
 ```
 
-This calls `run_show_all()` in `okta_soc/interface/show_all.py`, which:
-
-- Reads all `.jsonl` files under `data/`.
-- Pretty-prints:
-  - Findings
-  - Incidents
-  - Plans
-  - Commands
-
-with Rich panels and indent guides.
-
 ### Convenience Script
 
-A helper script is included:
-
-**File:** `run.sh`
-
 ```bash
-#!/bin/zsh
-rm -f data/*.jsonl
-uv run python -m okta_soc.interface.cli --hours 24
-uv run python -m okta_soc.interface.cli show-all
+./run.sh
 ```
 
-This:
-
-1. Clears all previous artifacts.
-2. Runs the pipeline for the last 24 hours.
-3. Prints all results.
+Clears previous artifacts, runs the pipeline, and prints results.
 
 ---
 
@@ -554,42 +448,26 @@ Settings are loaded from environment variables (via `.env` and `python-dotenv`):
 ```env
 OKTA_ORG_URL="https://example.okta.com"
 OKTA_API_TOKEN="REPLACE_ME"
-LLM_BASE_URL="http://localhost:1234/v1"
+LLM_BASE_URL="http://100.113.108.1:1234/v1"
 LLM_MODEL="gpt-oss-20b"
-LLM_API_KEY="lm-studio"   # or whatever your endpoint expects
+LLM_API_KEY="lm-studio"
 ```
 
-Defaults (if not set):
-
-- `OKTA_ORG_URL`: `https://example.okta.com`
-- `OKTA_API_TOKEN`: `REPLACE_ME`
-- `LLM_BASE_URL`: `http://192.168.1.225:1234/v1`
-- `LLM_MODEL`: `gpt-oss-20b`
-- `LLM_API_KEY`: `lm-studio`
-
-The `LLMClient` in `okta_soc/core/llm.py` uses the OpenAI-compatible `chat.completions.create` API.
+The `LLMClient` in `okta_soc/core/llm.py` uses the OpenAI-compatible `chat.completions.create` API, so it works with LM Studio, Ollama, vLLM, or any OpenAI-compatible endpoint.
 
 ---
 
 ## Demo Mode vs Real Okta
 
-Currently, `OktaClient` is in **demo mode**:
-
 **File:** `okta_soc/ingest/okta_client.py`
 
+Currently in **demo mode**:
+
+- Reads from `tests/demo_okta_system_logs.json` (9 events from Nov 2025).
+- Filters by the `--hours` time window (use a large value like `100000` for demo data).
 - Ignores the real Okta API.
-- Reads from a local JSON file:
 
-  ```text
-  tests/demo_okta_system_logs.json
-  ```
-
-- Parses timestamps to timezone-aware UTC datetimes.
-- Filters out events older than the `since` time passed to `fetch_events_since()`.
-
-This makes the system easy to demo without real Okta credentials.
-
-To integrate with real Okta, you’d replace the implementation of `fetch_events_since()` with calls to the Okta System Log API and map those responses into `OktaEvent`.
+To integrate with real Okta, replace `fetch_events_since()` with calls to the Okta System Log API and map responses into `OktaEvent`.
 
 ---
 
@@ -597,80 +475,66 @@ To integrate with real Okta, you’d replace the implementation of `fetch_events
 
 ### Adding a New Detector
 
-1. Create a new file in `okta_soc/detectors/`, e.g. `impossible_mfa.py`.
-2. Implement a class inheriting `BaseDetector`:
+1. Create a new file in `okta_soc/detectors/`, implement `BaseDetector`:
 
    ```python
-   from datetime import timedelta
-   from typing import List
-   import uuid
-
-   from okta_soc.core.models import OktaEvent, DetectionFinding, FindingType
-   from .base import BaseDetector
-
-   class ImpossibleMFADetector(BaseDetector):
-       name = "impossible_mfa"
+   class MFAFatigueDetector(BaseDetector):
+       name = "mfa_fatigue"
 
        def detect(self, events: List[OktaEvent]) -> List[DetectionFinding]:
-           findings = []
-           # ... your detection logic ...
-           return findings
+           # your detection logic
+           ...
    ```
 
-3. Register it in `okta_soc/detectors/registry.py`:
+2. Register it in `okta_soc/detectors/registry.py`:
 
    ```python
-   from .impossible_mfa import ImpossibleMFADetector
-
    def get_all_detectors() -> List[BaseDetector]:
        return [
            ImpossibleTravelDetector(),
            FailedLoginBurstDetector(),
-           ImpossibleMFADetector(),  # new
+           MFAFatigueDetector(),  # new
        ]
    ```
 
-Done. The `DetectorAgent` will automatically run your new detector.
+Done. The `DetectorAgent` automatically runs all registered detectors.
 
 ---
 
 ### Adding a New Agent
 
-1. Implement a new agent in `okta_soc/agents/`, e.g. `notify_agent.py`:
+This is where the typed contract system shines. **Two steps only — no router or orchestrator changes needed.**
+
+1. **Write the agent class with a contract:**
 
    ```python
-   from .base import BaseAgent
+   from okta_soc.agents.base import BaseAgent, AgentContract
 
-   class NotifyAgent(BaseAgent):
-       name = "notify_agent"
+   class SlackNotifierAgent(BaseAgent):
+       contract = AgentContract(
+           name="slack_notifier",
+           description="Sends a formatted alert to the #security-alerts Slack channel.",
+           consumes=["SecurityIncident"],
+           produces=["NotificationResult"],
+           phase_hint="response",
+           side_effects=["slack_notification"],
+       )
 
-       async def run(self, incident):
-           # e.g. draft an email or Slack message
-           ...
+       async def run(self, input_data):
+           incident = input_data["SecurityIncident"]
+           result = await self.slack_client.post_alert(incident)
+           return {"NotificationResult": result}
    ```
 
-2. Register it in `okta_soc/agents/registry.py`:
+2. **Register it in `pipeline.py`:**
 
    ```python
-   from .notify_agent import NotifyAgent
-
-   AGENTS: Dict[str, AgentMeta] = {
-       # existing agents...
-       "notify_agent": AgentMeta(
-           name="notify_agent",
-           description="Drafts notifications to users or admins about incidents.",
-           input_type="SecurityIncident",
-           output_type="NotificationDraft",
-           phase="response",
-           critical=False,
-       ),
-   }
+   registry.register(SlackNotifierAgent(slack_client=client))
    ```
 
-3. Update `Orchestrator` / `RouterAgent` logic if you want the router to consider it.
+That's it. The LLM router will see this agent in its catalog and can choose to include it when processing incidents. The type system ensures it can only be wired where `SecurityIncident` is available. No router or orchestrator edits required.
 
-   - Add to `_agent_map` in `Orchestrator.__init__`.
-   - Update routing rules and/or guardrails in `RouterAgent` for new `step_id` patterns or phases.
+**Adding enrichment agents works the same way.** For example, an IP reputation agent that consumes `DetectionFinding` and produces `EnrichedFinding` would slot in between the detector and risk agents — the LLM figures out the ordering from the types.
 
 ---
 
@@ -678,55 +542,30 @@ Done. The `DetectorAgent` will automatically run your new detector.
 
 The LLM is used in three roles:
 
-1. **Router (RouterAgent)**
-   - Decides which agents to run and in what order based on structured context.
-   - Forced into a small JSON schema.
-   - Guardrails heavily constrain possible outputs.
+1. **Router (RouterAgent)** — Composes the pipeline. Given the agent catalog and available types, decides which agents to run and in what order. Type validation ensures the plan is sound.
 
-2. **Risk Analysis (LLMRiskAgent)**
-   - Assigns severity and numerical risk metrics to `DetectionFinding`.
-   - Responsible for the qualitative reasoning `"rationale"`.
-   - Promotion logic is **always** enforced by Python, not the model.
+2. **Risk Analysis (LLMRiskAgent)** — Scores risk for each finding. Promotion logic is always enforced by Python, not the model.
 
-3. **Response Planning (PlannerAgent)**
-   - Maps incidents to a structured `ResponsePlan` using canonical step IDs.
-   - Must output **only JSON**; any extra text is stripped.
-   - Design goal: make response plans interpretable, editable, and auditable.
+3. **Response Planning (PlannerAgent)** — Designs structured response plans with canonical step IDs.
 
-JSON parsing:
-
-- `LLMClient.chat_json()` wraps `chat()`, forces the model to output JSON, and does a best-effort brace extraction before `json.loads()`.
-
-If the model returns extra commentary, the code tries to salvage the JSON block between the first `{` and the last `}`.
+JSON parsing: `LLMClient.chat_json()` forces JSON-only output and does best-effort brace extraction before `json.loads()`.
 
 ---
 
 ## Limitations & Safety Notes
 
-- **Demo Only**: The current implementation uses demo input via `tests/demo_okta_system_logs.json` and template `curl` commands with placeholders. It does not talk to Okta by default.
-- **No Auto-Execution**: Commands produced by `CommandAgent` are:
-  - Marked as `read_only` in their metadata.
-  - Obviously templated with `{userId}` and `<REDACTED_TOKEN>`.
-  - Intended for **human review** only.
-- **LLM Hallucinations**: While guardrails and schemas reduce nonsense, the LLM can still:
-  - Misjudge risk.
-  - Over/under-estimate severity.
-  - Propose overly aggressive plans.  
-  Always treat outputs as **recommendations**, not truth.
-- **Time & Geo Assumptions**: Detectors use simple time and country comparisons; real-world mileage may vary and should be tuned for:
-  - Travel patterns.
-  - Known VPN regions.
-  - Normal user behavior.
+- **Demo Only**: Uses demo input via `tests/demo_okta_system_logs.json` and template `curl` commands with placeholders.
+- **No Auto-Execution**: Commands are marked `read_only` with `{userId}` and `<REDACTED_TOKEN>` placeholders. Intended for human review only.
+- **LLM Hallucinations**: While type validation prevents nonsensical pipelines, the LLM can still misjudge risk, over/under-estimate severity, or propose overly aggressive plans. Always treat outputs as recommendations.
+- **No Error Recovery**: If the LLM returns malformed JSON or the endpoint is unreachable, the pipeline will crash. Production use would need retry logic and fallbacks.
 
 ---
 
 ## Getting Started (Install & Run)
 
-From the project root:
-
 ```bash
-# (Optional) using uv
-uv run pip install .
+# Install with uv
+uv pip install .
 
 # Or with plain pip
 pip install .
@@ -735,17 +574,17 @@ pip install .
 Set up your `.env`:
 
 ```env
-OKTA_ORG_URL="https://example.okta.com" # Can leave unmodified for demo
-OKTA_API_TOKEN="REPLACE_ME" # Can leave unmodified for demo
-LLM_BASE_URL="http://localhost:1234/v1"
+OKTA_ORG_URL="https://example.okta.com"
+OKTA_API_TOKEN="REPLACE_ME"
+LLM_BASE_URL="http://100.113.108.1:1234/v1"
 LLM_MODEL="gpt-oss-20b"
 LLM_API_KEY="lm-studio"
 ```
 
-Run the pipeline and show results:
+Run:
 
 ```bash
-okta-soc --hours 24
+okta-soc --hours 100000
 okta-soc show-all
 ```
 
@@ -755,4 +594,10 @@ Or use the convenience script:
 ./run.sh
 ```
 
-Then explore the structured artifacts in `data/` to see how the agentic SOC pipeline behaved end-to-end.
+### Running Tests
+
+```bash
+python -m pytest tests/ -v
+```
+
+25 tests covering agent contracts, registry, router validation, orchestrator execution, and pipeline wiring.
