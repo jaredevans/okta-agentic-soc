@@ -131,7 +131,7 @@ class StubEscalation(BaseAgent):
         consumes=["SecurityIncident"],
         produces=["EscalationResult"],
         phase_hint="response",
-        side_effects=["slack_notification"],
+        actions=["slack_notification"],
     )
     async def run(self, input_data: Dict[str, Any]) -> Dict[str, Any]:
         return {}

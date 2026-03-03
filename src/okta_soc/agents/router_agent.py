@@ -21,7 +21,7 @@ Rules:
   For example, if risk_agent consumes "DetectionFinding" but the pipeline has "List[DetectionFinding]",
   set iterate_over to "List[DetectionFinding]" so the orchestrator runs it once per item.
 - Only include agents that are relevant to the current data and context.
-- Prefer agents with side_effects only when the situation warrants it (e.g., high severity incidents).
+- Prefer agents with actions (e.g., notifications, tickets) only when the situation warrants it.
 - Be concise and deterministic.
 """
 

@@ -25,8 +25,8 @@ class AgentRegistry:
                 f"  Produces: {', '.join(c.produces)}",
                 f"  Phase hint: {c.phase_hint}",
             ]
-            if c.side_effects:
-                parts.append(f"  Side effects: {', '.join(c.side_effects)}")
+            if c.actions:
+                parts.append(f"  Actions: {', '.join(c.actions)}")
             if c.requires_human_approval:
                 parts.append("  Requires human approval: yes")
             lines.append("\n".join(parts))

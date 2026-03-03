@@ -28,7 +28,7 @@ def test_escalation_agent_has_contract():
     assert agent.contract.name == "escalation_agent"
     assert "SecurityIncident" in agent.contract.consumes
     assert "EscalationResult" in agent.contract.produces
-    assert "slack_notification" in agent.contract.side_effects
+    assert "slack_notification" in agent.contract.actions
 
 
 def _make_incident(severity: Severity) -> SecurityIncident:

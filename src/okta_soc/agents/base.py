@@ -10,7 +10,7 @@ class AgentContract:
     consumes: List[str]           # Data type keys this agent reads from PipelineContext
     produces: List[str]           # Data type keys this agent writes to PipelineContext
     phase_hint: str               # "ingest", "analysis", "response" — advisory
-    side_effects: List[str] = field(default_factory=list)
+    actions: List[str] = field(default_factory=list)
     requires_human_approval: bool = False
 
 

@@ -160,7 +160,7 @@ The router shows the LLM:
    - escalation_agent: Sends Slack notification for high-severity incidents.
      Consumes: SecurityIncident
      Produces: EscalationResult
-     Side effects: slack_notification
+     Actions: slack_notification
    ```
 
 2. **What data types are currently available** in the pipeline (e.g., `["List[OktaEvent]"]`).
@@ -248,7 +248,7 @@ class AgentContract:
     consumes: List[str]     # Data type keys this agent reads (e.g., ["List[OktaEvent]"])
     produces: List[str]     # Data type keys this agent writes (e.g., ["List[DetectionFinding]"])
     phase_hint: str         # Advisory: "ingest", "analysis", "response"
-    side_effects: List[str] # e.g., ["slack_notification"] — helps LLM decide when to use
+    actions: List[str]      # e.g., ["slack_notification"] — helps LLM decide when to use
     requires_human_approval: bool  # Whether output needs sign-off
 ```
 
@@ -374,9 +374,9 @@ Generates `curl` command templates for known `step_id` values (`lock_account`, `
 - **Consumes:** `SecurityIncident` (called per-incident via `iterate_over`)
 - **Produces:** `EscalationResult`
 - **LLM:** No — deterministic.
-- **Side effects:** `slack_notification`
+- **Actions:** `slack_notification`
 
-This is the first agent to use `side_effects` in its contract. The router includes it whenever `SecurityIncident` will be produced — severity filtering happens inside the agent, not at routing time (since the router runs before risk scoring, it can't know severity yet).
+This is the first agent to use `actions` in its contract. The router includes it whenever `SecurityIncident` will be produced — severity filtering happens inside the agent, not at routing time (since the router runs before risk scoring, it can't know severity yet).
 
 **Internal severity guard:** The agent only sends notifications (`sent=True`) for HIGH or CRITICAL severity. For LOW or MEDIUM, it returns `sent=False` and skips the notification. This means the router can always include it safely.
 
@@ -563,7 +563,7 @@ The `EscalationAgent` was added this way. Here's the pattern:
            consumes=["SecurityIncident"],
            produces=["EscalationResult"],
            phase_hint="response",
-           side_effects=["slack_notification"],  # tells router this has external effects
+           actions=["slack_notification"],  # tells router this agent takes action
        )
 
        async def run(self, input_data):
@@ -578,7 +578,7 @@ The `EscalationAgent` was added this way. Here's the pattern:
    registry.register(EscalationAgent())
    ```
 
-That's it. The LLM router sees this agent in its catalog and decides whether to include it based on context. The `side_effects` field signals the router to be selective. The type system ensures it can only be wired where `SecurityIncident` is available. No router or orchestrator edits required.
+That's it. The LLM router sees this agent in its catalog and decides whether to include it based on context. The `actions` field signals the router that this agent takes action beyond producing data. The type system ensures it can only be wired where `SecurityIncident` is available. No router or orchestrator edits required.
 
 **Adding enrichment agents works the same way.** For example, an IP reputation agent that consumes `DetectionFinding` and produces `EnrichedFinding` would slot in between the detector and risk agents — the LLM figures out the ordering from the types.
 

@@ -13,21 +13,21 @@ def test_agent_contract_has_required_fields():
     assert contract.name == "test_agent"
     assert contract.consumes == ["List[OktaEvent]"]
     assert contract.produces == ["List[DetectionFinding]"]
-    assert contract.side_effects == []
+    assert contract.actions == []
     assert contract.requires_human_approval is False
 
 
-def test_agent_contract_with_side_effects():
+def test_agent_contract_with_actions():
     contract = AgentContract(
         name="notifier",
         description="Sends alerts",
         consumes=["SecurityIncident"],
         produces=["NotificationResult"],
         phase_hint="response",
-        side_effects=["slack_notification"],
+        actions=["slack_notification"],
         requires_human_approval=False,
     )
-    assert contract.side_effects == ["slack_notification"]
+    assert contract.actions == ["slack_notification"]
 
 
 def test_base_agent_requires_contract():

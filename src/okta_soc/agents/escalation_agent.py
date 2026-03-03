@@ -20,7 +20,7 @@ class EscalationAgent(BaseAgent):
         consumes=["SecurityIncident"],
         produces=["EscalationResult"],
         phase_hint="response",
-        side_effects=["slack_notification"],
+        actions=["slack_notification"],
     )
 
     CHANNEL = "#soc-critical-alerts"
