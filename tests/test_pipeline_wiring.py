@@ -5,10 +5,11 @@ from okta_soc.agents.detector_agent import DetectorAgent
 from okta_soc.agents.risk_agent import LLMRiskAgent
 from okta_soc.agents.planner_agent import PlannerAgent
 from okta_soc.agents.command_agent import CommandAgent
+from okta_soc.agents.escalation_agent import EscalationAgent
 
 
 def test_all_agents_register_without_error():
-    """All four agents can be registered in a single registry."""
+    """All five agents can be registered in a single registry."""
     registry = AgentRegistry()
     # These don't need real LLM clients for registration
     registry.register(DetectorAgent())
@@ -25,9 +26,12 @@ def test_all_agents_register_without_error():
     cmd.contract = CommandAgent.contract
     registry.register(cmd)
 
-    assert len(registry.agents) == 4
+    registry.register(EscalationAgent())
+
+    assert len(registry.agents) == 5
     catalog = registry.catalog_for_llm()
     assert "detector_agent" in catalog
     assert "risk_agent" in catalog
     assert "planner_agent" in catalog
     assert "command_agent" in catalog
+    assert "escalation_agent" in catalog

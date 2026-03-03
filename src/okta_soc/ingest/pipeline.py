@@ -9,6 +9,7 @@ from okta_soc.agents.detector_agent import DetectorAgent
 from okta_soc.agents.risk_agent import LLMRiskAgent
 from okta_soc.agents.planner_agent import PlannerAgent
 from okta_soc.agents.command_agent import CommandAgent
+from okta_soc.agents.escalation_agent import EscalationAgent
 from okta_soc.agents.registry import AgentRegistry
 from okta_soc.agents.orchestrator import Orchestrator
 from okta_soc.ingest.okta_client import OktaClient
@@ -29,6 +30,7 @@ async def fetch_and_process(since: datetime) -> None:
     registry.register(LLMRiskAgent(llm))
     registry.register(PlannerAgent(llm))
     registry.register(CommandAgent(settings.okta_org_url))
+    registry.register(EscalationAgent())
 
     # Build router and orchestrator
     router = RouterAgent(llm=llm, registry=registry)
@@ -50,7 +52,7 @@ async def fetch_and_process(since: datetime) -> None:
 def _persist_results(context) -> None:
     """Save pipeline outputs to JSONL files."""
     from okta_soc.storage.repositories import (
-        FindingsRepo, IncidentsRepo, PlansRepo, CommandsRepo,
+        FindingsRepo, IncidentsRepo, PlansRepo, CommandsRepo, EscalationsRepo,
     )
 
     findings_repo = FindingsRepo()
@@ -73,3 +75,7 @@ def _persist_results(context) -> None:
                 commands_repo.save("", c)
         else:
             commands_repo.save("", cmd_list)
+
+    escalations_repo = EscalationsRepo()
+    for escalation in context.data.get("List[EscalationResult]", []):
+        escalations_repo.save(escalation)

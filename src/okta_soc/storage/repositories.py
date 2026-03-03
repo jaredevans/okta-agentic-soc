@@ -10,6 +10,7 @@ from okta_soc.core.models import (
     ResponsePlan,
     CommandSuggestion,
     RiskScore,
+    EscalationResult,
 )
 
 
@@ -92,3 +93,12 @@ class CommandsRepo:
         }
         with self.path.open("a") as f:
             f.write(json.dumps(record) + "\n")
+
+
+class EscalationsRepo:
+    def __init__(self, path: Path | None = None):
+        self.path = path or DATA_DIR / "escalations.jsonl"
+
+    def save(self, escalation: EscalationResult) -> None:
+        with self.path.open("a") as f:
+            f.write(escalation.model_dump_json() + "\n")
