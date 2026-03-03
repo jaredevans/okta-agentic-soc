@@ -11,7 +11,7 @@ class LLMClient:
         api_key: str | None = None,
         model: str | None = None,
     ):
-        base_url = base_url or os.getenv("LLM_BASE_URL", "http://192.168.1.225:1234/v1")
+        base_url = base_url or os.getenv("LLM_BASE_URL", "http://100.113.108.1:1234/v1")
         api_key = api_key or os.getenv("LLM_API_KEY", "lm-studio")
         model = model or os.getenv("LLM_MODEL", "gpt-oss-20b")
 
