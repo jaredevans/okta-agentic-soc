@@ -50,10 +50,12 @@ def run_show_all():
     incidents = load_jsonl(DATA_DIR / "incidents.jsonl")
     plans = load_jsonl(DATA_DIR / "plans.jsonl")
     commands = load_jsonl(DATA_DIR / "commands.jsonl")
+    escalations = load_jsonl(DATA_DIR / "escalations.jsonl")
 
     show_section("Findings", findings)
     show_section("Incidents", incidents)
     show_section("Plans", plans)
     show_section("Commands", commands)
+    show_section("Escalations", escalations)
 
     console.print("\n[green]Done displaying all output.[/green]")

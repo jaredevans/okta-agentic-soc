@@ -13,8 +13,9 @@ class EscalationAgent(BaseAgent):
     contract = AgentContract(
         name="escalation_agent",
         description=(
-            "Sends Slack notification for high-severity or critical security incidents. "
-            "Should only be included in the pipeline when incidents warrant escalation."
+            "Sends Slack notification for security incidents. "
+            "Include this agent whenever SecurityIncidents will be produced. "
+            "The agent internally filters by severity and only notifies for HIGH or CRITICAL."
         ),
         consumes=["SecurityIncident"],
         produces=["EscalationResult"],
@@ -38,6 +39,7 @@ class EscalationAgent(BaseAgent):
         )
 
         if should_send:
+            print(f"\n\U0001f4e2 [SIMULATED SLACK] {self.CHANNEL}\n{message}\n")
             logger.info(
                 "[SIMULATED SLACK] #%s \u2192 %s",
                 self.CHANNEL,
