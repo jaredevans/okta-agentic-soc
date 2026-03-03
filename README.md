@@ -376,13 +376,20 @@ Generates `curl` command templates for known `step_id` values (`lock_account`, `
 - **LLM:** No — deterministic.
 - **Side effects:** `slack_notification`
 
-This is the first agent to use `side_effects` in its contract, which signals to the LLM router that it has external effects and should only be included when the situation warrants it.
+This is the first agent to use `side_effects` in its contract. The router includes it whenever `SecurityIncident` will be produced — severity filtering happens inside the agent, not at routing time (since the router runs before risk scoring, it can't know severity yet).
 
-**The LLM router decides whether to include this agent.** The agent description tells the router it's for high-severity incidents, and the router's system prompt says to "prefer agents with side_effects only when the situation warrants it." This makes the routing decision genuinely context-sensitive — the first place in the pipeline where the LLM's choice actually matters.
+**Internal severity guard:** The agent only sends notifications (`sent=True`) for HIGH or CRITICAL severity. For LOW or MEDIUM, it returns `sent=False` and skips the notification. This means the router can always include it safely.
 
-**Internal safety net:** Even if the router includes this agent for a low-severity incident, the agent guards internally — it only sends (`sent=True`) for HIGH or CRITICAL severity. For LOW or MEDIUM, it returns `sent=False` and skips the notification.
+During a pipeline run, sent notifications are printed to the terminal:
 
-Currently simulates Slack via logging. Ready to wire to a real Slack webhook when needed.
+```
+📢 [SIMULATED SLACK] #soc-critical-alerts
+[CRITICAL] Incident from impossible_travel
+Risk score: 0.95
+User logged in from two countries within 5 minutes.
+```
+
+Currently simulates Slack via `print()`. Ready to wire to a real Slack webhook when needed.
 
 ---
 
