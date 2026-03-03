@@ -124,6 +124,19 @@ class StubPlanner(BaseAgent):
         return {}
 
 
+class StubEscalation(BaseAgent):
+    contract = AgentContract(
+        name="escalation_agent",
+        description="Sends Slack notification for high-severity incidents.",
+        consumes=["SecurityIncident"],
+        produces=["EscalationResult"],
+        phase_hint="response",
+        side_effects=["slack_notification"],
+    )
+    async def run(self, input_data: Dict[str, Any]) -> Dict[str, Any]:
+        return {}
+
+
 def test_auto_iterate_when_list_available():
     """If agent consumes T but only List[T] is available, auto-set iterate_over."""
     mock_llm = MagicMock()
@@ -180,3 +193,37 @@ def test_iterated_step_only_produces_list_types():
     # planner should still be included (auto-iterated over List[SecurityIncident])
     assert len(plan.steps) == 3
     assert plan.steps[2].iterate_over == "List[SecurityIncident]"
+
+
+def test_escalation_included_when_incidents_available():
+    """Router can include escalation_agent alongside planner_agent."""
+    mock_llm = MagicMock()
+    mock_llm.chat_json.return_value = {
+        "steps": [
+            {"agent_name": "detector_agent", "reason": "detect"},
+            {"agent_name": "risk_agent", "reason": "score", "iterate_over": "List[DetectionFinding]"},
+            {"agent_name": "planner_agent", "reason": "plan"},
+            {"agent_name": "escalation_agent", "reason": "notify SOC team"},
+        ]
+    }
+
+    reg = AgentRegistry()
+    reg.register(StubDetector())
+    reg.register(StubRisk())
+    reg.register(StubPlanner())
+    reg.register(StubEscalation())
+    router = RouterAgent(llm=mock_llm, registry=reg)
+
+    ctx = PipelineContext(
+        data={"List[OktaEvent]": []},
+        metadata={},
+    )
+
+    plan = asyncio.run(router.run(ctx))
+    agent_names = [s.agent_name for s in plan.steps]
+    assert "escalation_agent" in agent_names
+    assert "planner_agent" in agent_names
+    # Both should auto-iterate over List[SecurityIncident]
+    for step in plan.steps:
+        if step.agent_name in ("planner_agent", "escalation_agent"):
+            assert step.iterate_over == "List[SecurityIncident]"
