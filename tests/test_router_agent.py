@@ -110,3 +110,73 @@ def test_validate_rejects_unknown_agent():
     plan = asyncio.run(router.run(ctx))
     assert len(plan.steps) == 1
     assert plan.steps[0].agent_name == "detector_agent"
+
+
+class StubPlanner(BaseAgent):
+    contract = AgentContract(
+        name="planner_agent",
+        description="Plans response",
+        consumes=["SecurityIncident"],
+        produces=["ResponsePlan"],
+        phase_hint="response",
+    )
+    async def run(self, input_data: Dict[str, Any]) -> Dict[str, Any]:
+        return {}
+
+
+def test_auto_iterate_when_list_available():
+    """If agent consumes T but only List[T] is available, auto-set iterate_over."""
+    mock_llm = MagicMock()
+    # LLM forgets to set iterate_over for planner
+    mock_llm.chat_json.return_value = {
+        "steps": [
+            {"agent_name": "detector_agent", "reason": "detect"},
+            {"agent_name": "risk_agent", "reason": "score", "iterate_over": "List[DetectionFinding]"},
+            {"agent_name": "planner_agent", "reason": "plan"},  # no iterate_over
+        ]
+    }
+
+    reg = AgentRegistry()
+    reg.register(StubDetector())
+    reg.register(StubRisk())
+    reg.register(StubPlanner())
+    router = RouterAgent(llm=mock_llm, registry=reg)
+
+    ctx = PipelineContext(
+        data={"List[OktaEvent]": []},
+        metadata={},
+    )
+
+    plan = asyncio.run(router.run(ctx))
+    assert len(plan.steps) == 3
+    # planner should have iterate_over auto-set
+    assert plan.steps[2].agent_name == "planner_agent"
+    assert plan.steps[2].iterate_over == "List[SecurityIncident]"
+
+
+def test_iterated_step_only_produces_list_types():
+    """After an iterated step, only List[T] should be available, not bare T."""
+    mock_llm = MagicMock()
+    mock_llm.chat_json.return_value = {
+        "steps": [
+            {"agent_name": "detector_agent", "reason": "detect"},
+            {"agent_name": "risk_agent", "reason": "score", "iterate_over": "List[DetectionFinding]"},
+            {"agent_name": "planner_agent", "reason": "plan"},
+        ]
+    }
+
+    reg = AgentRegistry()
+    reg.register(StubDetector())
+    reg.register(StubRisk())
+    reg.register(StubPlanner())
+    router = RouterAgent(llm=mock_llm, registry=reg)
+
+    ctx = PipelineContext(
+        data={"List[OktaEvent]": []},
+        metadata={},
+    )
+
+    plan = asyncio.run(router.run(ctx))
+    # planner should still be included (auto-iterated over List[SecurityIncident])
+    assert len(plan.steps) == 3
+    assert plan.steps[2].iterate_over == "List[SecurityIncident]"

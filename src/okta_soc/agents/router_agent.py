@@ -86,25 +86,50 @@ Return ONLY JSON:
                 continue  # Unknown agent, skip
 
             contract = agent.contract
+            is_iterating = False
 
-            # Check if all consumed types are available
-            # Account for iterate_over: if iterating, the list type must be available
-            # and the singular consumed type is provided per-item by the orchestrator
             if step.iterate_over and step.iterate_over in available:
-                # The agent consumes individual items; the list is available
+                # LLM explicitly set iterate_over and the list type exists
+                is_iterating = True
+                satisfied = True
+            elif all(t in available for t in contract.consumes):
+                # All consumed types are directly available
                 satisfied = True
             else:
-                satisfied = all(t in available for t in contract.consumes)
+                # Auto-detect: if agent consumes T but only List[T] is available,
+                # automatically set iterate_over
+                auto_iterate = None
+                for t in contract.consumes:
+                    list_key = f"List[{t}]"
+                    if t not in available and list_key in available:
+                        auto_iterate = list_key
+                        break
+
+                if auto_iterate:
+                    step = RouteStep(
+                        agent_name=step.agent_name,
+                        reason=step.reason,
+                        iterate_over=auto_iterate,
+                    )
+                    is_iterating = True
+                    satisfied = True
+                else:
+                    satisfied = False
 
             if not satisfied:
-                continue  # Inputs not available, skip this agent
+                continue
 
             valid_steps.append(step)
 
-            # Add this agent's produces to available types for downstream agents
+            # Track what types become available after this step.
+            # When iterating, the orchestrator collects outputs into List[T],
+            # so only List[T] is available downstream (not bare T).
             for t in contract.produces:
-                available.add(t)
-                available.add(f"List[{t}]")  # iteration collects into lists
+                if is_iterating:
+                    available.add(f"List[{t}]")
+                else:
+                    available.add(t)
+                    available.add(f"List[{t}]")
 
         plan.steps = valid_steps
         return plan

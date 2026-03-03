@@ -29,9 +29,15 @@ class Orchestrator:
             if agent is None:
                 continue
 
-            if step.iterate_over and step.iterate_over in context.data:
-                # Run agent once per item in the list
+            if step.iterate_over:
+                if step.iterate_over not in context.data:
+                    # The list to iterate over doesn't exist (prior step produced nothing)
+                    continue
                 items = context.data[step.iterate_over]
+                if not items:
+                    continue
+
+                # Run agent once per item in the list
                 collected: Dict[str, List[Any]] = {}
 
                 for item in items:
