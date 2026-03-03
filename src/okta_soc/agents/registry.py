@@ -1,48 +1,33 @@
-from dataclasses import dataclass
-from typing import Dict
+from typing import Dict, Optional
+from okta_soc.agents.base import BaseAgent
 
 
-@dataclass
-class AgentMeta:
-    name: str
-    description: str
-    input_type: str
-    output_type: str
-    phase: str          # "ingest", "analysis", "response"
-    critical: bool = False
+class AgentRegistry:
+    def __init__(self) -> None:
+        self.agents: Dict[str, BaseAgent] = {}
 
+    def register(self, agent: BaseAgent) -> None:
+        name = agent.contract.name
+        if name in self.agents:
+            raise ValueError(f"Agent '{name}' already registered")
+        self.agents[name] = agent
 
-AGENTS: Dict[str, AgentMeta] = {
-    "detector_agent": AgentMeta(
-        name="detector_agent",
-        description="Analyzes Okta events to detect anomalies like impossible travel, failed-login bursts, and MFA fatigue. Produces DetectionFindings.",
-        input_type="List[OktaEvent]",
-        output_type="List[DetectionFinding]",
-        phase="ingest",
-        critical=True,
-    ),
-    "risk_agent": AgentMeta(
-        name="risk_agent",
-        description="Assigns severity and risk scores to DetectionFindings, deciding how serious each one is.",
-        input_type="DetectionFinding",
-        output_type="RiskScore",
-        phase="analysis",
-        critical=True,
-    ),
-    "planner_agent": AgentMeta(
-        name="planner_agent",
-        description="Creates a ResponsePlan (steps, rationale) for a given SecurityIncident.",
-        input_type="SecurityIncident",
-        output_type="ResponsePlan",
-        phase="response",
-        critical=True,
-    ),
-    "command_agent": AgentMeta(
-        name="command_agent",
-        description="Generates read-only commands from a ResponsePlan for a human analyst to review.",
-        input_type="ResponsePlan",
-        output_type="List[CommandSuggestion]",
-        phase="response",
-        critical=False,
-    ),
-}
+    def get(self, name: str) -> Optional[BaseAgent]:
+        return self.agents.get(name)
+
+    def catalog_for_llm(self) -> str:
+        lines = []
+        for agent in self.agents.values():
+            c = agent.contract
+            parts = [
+                f"- {c.name}: {c.description}",
+                f"  Consumes: {', '.join(c.consumes)}",
+                f"  Produces: {', '.join(c.produces)}",
+                f"  Phase hint: {c.phase_hint}",
+            ]
+            if c.side_effects:
+                parts.append(f"  Side effects: {', '.join(c.side_effects)}")
+            if c.requires_human_approval:
+                parts.append("  Requires human approval: yes")
+            lines.append("\n".join(parts))
+        return "\n\n".join(lines)
